@@ -1,0 +1,14 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: An AWS Serverless Specification template describing your function.
+Resources:
+  enedbfuncRds:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: cloud9-enedbfuncRds-enedbfuncRds-Z5M56XSUPOS0
+      Description: ''
+      Handler: enedbfuncRds/lambda_function.lambda_handler
+      MemorySize: 128
+      Role: 'arn:aws:iam::712785604663:role/lambda-vpc-role-ene'
+      Runtime: python3.6
+      Timeout: 15
