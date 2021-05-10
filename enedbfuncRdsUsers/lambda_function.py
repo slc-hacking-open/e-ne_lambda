@@ -44,8 +44,7 @@ def lambda_handler(event, context):
     
     operation = event['httpMethod']
     if operation in operations:
-        payload = event['queryStringParameters'] if operation == 'GET' else json.loads(event['body'])
-        return respond(operations[operation](conn, payload))
+        return respond(operations[operation](conn, event))
     
     # CORS対応
     elif operation == 'OPTIONS':
@@ -86,7 +85,7 @@ def db_get(conn, x):
     print(json.dumps(x))
     
     # パラメータに取得するIDが設定されている場合
-    id = x.get('userid') if x else None
+    id = x['pathParameters'].get('userid') if x['pathParameters'] else None
     if id is not None and re.match(r"^\d+$", str(id)):
 
         # 該当idのものをクエリー
@@ -127,7 +126,7 @@ def respond(res):
     print(json.dumps(res))
     return {
         'statusCode': '400' if res['error'] else '200',
-        'body': str(res['error']) if res['error'] else json.dumps(res),
+        'body': str(res['error']) if res['error'] else json.dumps(res).encode(),
         'headers': {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin' : '*'
