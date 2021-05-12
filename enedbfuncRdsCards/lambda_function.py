@@ -134,7 +134,7 @@ def edit_enecarddata(dbresult):
                     sql = "select * from Ene_Users WHERE userid = %s"
                     cur.execute(sql, (v))
                     result = cur.fetchall()
-                    data[k] = result
+                    data[k] = result[0]
                     
                 # 共感している人の情報を取得
                 elif k == 'id':
@@ -267,8 +267,8 @@ def insert_ene(conn, x):
         item = {
                 'id' : insertid,
                 'contents' : contents,
-                'reciever' : recieverresult,
-                'sender'   : senderresult,
+                'reciever' : recieverresult[0],
+                'sender'   : senderresult[0],
                 'datetime' : sysdate,
                 'empathyUserIds' : []
                 }
