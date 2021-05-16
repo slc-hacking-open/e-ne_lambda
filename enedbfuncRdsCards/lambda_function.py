@@ -83,7 +83,7 @@ eねカード取得
 #                    "imageurl" プロフィール画像
 #                }
 #            ], 
-#            "reciever":[ 
+#            "receiver":[ 
 #                { 
 #                  "name": 名前
 #                  "imageurl" プロフィール画像
@@ -100,6 +100,10 @@ def db_get(conn, x):
     
     # カードID取得
     cardid = x['pathParameters'].get('cardid') if x['pathParameters'] else None
+    # 送信者ID取得
+    senderId = x['queryStringParameters'].get('senderId') if x['queryStringParameters'] else None
+    # 受信者ID取得
+    receiverId = x['queryStringParameters'].get('receiverId') if x['queryStringParameters'] else None
     
     with conn.cursor() as cur:
         # パラメータにカードIDが設定されている場合
@@ -107,13 +111,22 @@ def db_get(conn, x):
             sql = "select * from Ene_Messages WHERE id = %s"
             cur.execute(sql, (cardid))
             result = cur.fetchall()
-        
+            if cur.rowcount == 0:
+                return db_error('eねがありません')
         else:
-            cur.execute("select * from Ene_Messages order by datetime desc limit 100")
-            result = cur.fetchall()
-    
-        if cur.rowcount == 0:
-            return db_error('eねがありません')
+            # パラメータに送信者IDが設定されている場合
+            if senderId is not None and re.match(r"^\d+$", str(senderId)):
+                sql = "select * from Ene_Messages WHERE sender = %s order by datetime desc limit 100"
+                cur.execute(sql, (senderId))
+                result = cur.fetchall()
+            # パラメータに受信者IDが設定されている場合
+            elif senderId is not None and re.match(r"^\d+$", str(receiverId)):
+                sql = "select * from Ene_Messages WHERE receiver = %s order by datetime desc limit 100"
+                cur.execute(sql, (receiverId))
+                result = cur.fetchall()
+            else:
+                cur.execute("select * from Ene_Messages order by datetime desc limit 100")
+                result = cur.fetchall()
             
     return {
         'result' : 1,
@@ -130,7 +143,7 @@ def edit_enecarddata(dbresult):
             data = {}
             likeUserIds = []
             for k,v in d.items():
-                if k == 'sender' or k == 'reciever':
+                if k == 'sender' or k == 'receiver':
                     sql = "select * from Ene_Users WHERE userid = %s"
                     cur.execute(sql, (v))
                     result = cur.fetchall()
@@ -164,7 +177,7 @@ def edit_enecarddata(dbresult):
 #   body: {
 #     data: {
 #       sender: 送り主ユーザーID
-#       reciever: 送り先ユーザーID
+#       receiver: 送り先ユーザーID
 #       contents: 内容
 #       giftCoin: 送信コイン
 #       userid: 共感ユーザーID
@@ -227,14 +240,14 @@ def insert_like(conn, cardid, empathizerid):
 
 def insert_ene(conn, x):
         contents   = x['data'].get('contents')
-        reciever   = x['data'].get('recieverid')
+        receiver   = x['data'].get('receiverid')
         sender     = x['data'].get('senderid')
 #        amount     = x['data'].get('amount')
     
         # 簡易的なエラーチェック
         if str.strip(contents) == '':
             return db_error('いいね内容が空欄です')
-        if not re.match(r"^\d+$", str(reciever)):
+        if not re.match(r"^\d+$", str(receiver)):
             return db_error('送り先IDが正しくありません')
         if not re.match(r"^\d+$", str(sender)):
             return db_error('送り主IDが正しくありません')
@@ -246,8 +259,8 @@ def insert_ene(conn, x):
     
         # DBに書き込む
         with conn.cursor() as cur:
-            sql = "insert into Ene_Messages (contents, sender, reciever, datetime) VALUES (%s, %s, %s, %s)"
-            r = cur.execute(sql, (contents, sender, reciever, sysdate))
+            sql = "insert into Ene_Messages (contents, sender, receiver, datetime) VALUES (%s, %s, %s, %s)"
+            r = cur.execute(sql, (contents, sender, receiver, sysdate))
             print(r)
             sql = "select * from Ene_Messages WHERE id = %s"
             insertid = conn.insert_id()
@@ -256,18 +269,18 @@ def insert_ene(conn, x):
             conn.commit()
         
         # ユーザー情報の取得
-        # sender、recieverのidに紐づくユーザー情報を取得
+        # sender、receiverのidに紐づくユーザー情報を取得
         with conn.cursor() as cur:
             sql = "select * from Ene_Users WHERE userid = %s"
             cur.execute(sql, (sender))
             senderresult = cur.fetchall()
-            cur.execute(sql, (reciever))
-            recieverresult = cur.fetchall()
+            cur.execute(sql, (receiver))
+            receiverresult = cur.fetchall()
         
         item = {
                 'id' : insertid,
                 'contents' : contents,
-                'reciever' : recieverresult[0],
+                'receiver' : receiverresult[0],
                 'sender'   : senderresult[0],
                 'datetime' : sysdate,
                 'empathyUserIds' : []
