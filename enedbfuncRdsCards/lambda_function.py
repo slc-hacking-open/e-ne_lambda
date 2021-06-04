@@ -19,10 +19,10 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 try:
-    conn = pymysql.connect(host=RDS_HOST, 
-                           user=RDS_USERNAME, 
-                           passwd=RDS_PASSWORD, 
-                           db=RDS_DBNAME, 
+    conn = pymysql.connect(host=RDS_HOST,
+                           user=RDS_USERNAME,
+                           passwd=RDS_PASSWORD,
+                           db=RDS_DBNAME,
                            connect_timeout=5,
                            cursorclass=pymysql.cursors.DictCursor)
 except pymysql.MySQLError as e:
@@ -40,13 +40,13 @@ def lambda_handler(event, context):
 #        'PUT': lambda conn, x: db_put(conn, x),
         'DELETE': lambda conn, x: db_delete(conn, x)
     }
-    
+
     print(event);
 
     operation = event['httpMethod']
     if operation in operations:
         return respond(operations[operation](conn, event))
-        
+
     # CORS対応
     elif operation == 'OPTIONS':
         return {
@@ -64,47 +64,16 @@ def lambda_handler(event, context):
         return respond(ValueError('Unsupported method "{}"'.format(operation)))
 
 
-'''
-eねカード取得
-#
-# パスパラメータ
-# cardid: カードID
-#
-# 戻り値（JSON）
-# {
-#   result : 1（成功） もしくは 0（失敗）
-#   error : エラーのときのメッセージ配列
-#   data : [
-#       {   
-#           "id": eねカードのID
-#           "sender":[ 送り主
-#                {
-#                    "name": 名前
-#                    "imageurl" プロフィール画像
-#                }
-#            ], 
-#            "receiver":[ 
-#                { 
-#                  "name": 名前
-#                  "imageurl" プロフィール画像
-#                }
-#            ],
-#            "contents": eね内容
-#            "datetime": 更新時間
-#            "empathyUserIds"　共感しているユーザー
-#        }
-#   ]
-# }
-'''
+# eねカード取得
 def db_get(conn, x):
-    
+
     # カードID取得
     cardid = x['pathParameters'].get('cardid') if x['pathParameters'] else None
     # 送信者ID取得
     senderId = x['queryStringParameters'].get('senderId') if x['queryStringParameters'] else None
     # 受信者ID取得
     receiverId = x['queryStringParameters'].get('receiverId') if x['queryStringParameters'] else None
-    
+
     with conn.cursor() as cur:
         # パラメータにカードIDが設定されている場合
         if cardid is not None and re.match(r"^\d+$", str(cardid)):
@@ -127,7 +96,7 @@ def db_get(conn, x):
             else:
                 cur.execute("select * from Ene_Messages order by datetime desc limit 100")
                 result = cur.fetchall()
-            
+
     return {
         'result' : 1,
         'error' : '',
@@ -137,18 +106,18 @@ def db_get(conn, x):
 def edit_enecarddata(dbresult):
 
     datalist = []
-        
+
     with conn.cursor() as cur:
         for d in dbresult:
             data = {}
-            likeUserIds = []
+            results = []
             for k,v in d.items():
                 if k == 'sender' or k == 'receiver':
                     sql = "select * from Ene_Users WHERE userid = %s"
                     cur.execute(sql, (v))
                     result = cur.fetchall()
                     data[k] = result[0]
-                    
+
                 # 共感している人の情報を取得
                 elif k == 'id':
                     data[k] = v
@@ -157,61 +126,40 @@ def edit_enecarddata(dbresult):
                     likeUsers = cur.fetchall()
                     for d in likeUsers:
                         for k,v in d.items():
-                            likeUserIds.append(v)
-                    data['empathyUserIds'] = likeUserIds
+                            sql = "select * from Ene_Users WHERE userid = %s"
+                            cur.execute(sql, (v))
+                            result = cur.fetchall()
+                            results.append(result[0])
+                    data['empathyUsers'] = results
                 else:
                     data[k] = v
-        
+
             datalist.append(data)
-    
+
     return datalist
 
 
 # eね投稿
-#
-# パスパラメータ
-# cardid=eねカードID
-# 省略時は新規投稿、設定時は共感
-#
-# {
-#   body: {
-#     data: {
-#       sender: 送り主ユーザーID
-#       receiver: 送り先ユーザーID
-#       contents: 内容
-#       giftCoin: 送信コイン
-#       userid: 共感ユーザーID
-#     }
-#   }
-# }
-#
-# 戻り値（JSON）
-# {
-#   result : 1（成功） もしくは 0（失敗）
-#   error : エラーのときのメッセージ配列
-#   data : { 
-#     設定されたデータ（形式は入力データと同じ）
-#   }
 def db_post(conn, x):
-    
+
     # 簡易的なエラーチェック
     if 'data' not in x['body']:
         return db_error('データ構造が不正です')
-    
+
     payload = json.loads(x['body']);
-    
+
     # パラメータにカードIDが設定されている場合、共感数を更新
     cardid = x['pathParameters'].get('cardid') if x['pathParameters'] else None
     if cardid is not None and re.match(r"^\d+$", str(cardid)):
 
         empathizerid  = payload['data'].get('empathizerid')
-    
+
         # 簡易的なエラーチェック
         if str.strip(empathizerid) == '':
             return db_error('共感ユーザーIDが空欄です')
-            
+
         return insert_like(conn, cardid, empathizerid)
-    
+
     # パラメータ省略時は新規追加
     else:
         return insert_ene(conn, payload)
@@ -221,17 +169,17 @@ def insert_like(conn, cardid, empathizerid):
         sql = "select * from Ene_Empathy WHERE id = %s and empathyuser = %s"
         cur.execute(sql, (cardid, empathizerid))
         result = cur.fetchall()
-                    
+
         if cur.rowcount == 0 :
             sql = "insert into Ene_Empathy (id, empathyuser) VALUES (%s, %s)"
             r = cur.execute(sql, (cardid, empathizerid))
-        
+
         else:
             sql = "delete from Ene_Empathy where id = %s and empathyuser = %s"
             r = cur.execute(sql, (cardid, empathizerid))
-        
+
         conn.commit()
-    
+
     return {
         'result' : 1,
         'error' : '',
@@ -243,7 +191,7 @@ def insert_ene(conn, x):
         receiver   = x['data'].get('receiverid')
         sender     = x['data'].get('senderid')
 #        amount     = x['data'].get('amount')
-    
+
         # 簡易的なエラーチェック
         if str.strip(contents) == '':
             return db_error('いいね内容が空欄です')
@@ -253,10 +201,10 @@ def insert_ene(conn, x):
             return db_error('送り主IDが正しくありません')
 #        if str.strip(amount) == '':
 #            return db_error('送信コインが空欄です')
-    
+
         # システム日付取得
         sysdate = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    
+
         # DBに書き込む
         with conn.cursor() as cur:
             sql = "insert into Ene_Messages (contents, sender, receiver, datetime) VALUES (%s, %s, %s, %s)"
@@ -267,7 +215,7 @@ def insert_ene(conn, x):
             cur.execute(sql, (insertid))
             result = cur.fetchall()
             conn.commit()
-        
+
         # ユーザー情報の取得
         # sender、receiverのidに紐づくユーザー情報を取得
         with conn.cursor() as cur:
@@ -276,7 +224,7 @@ def insert_ene(conn, x):
             senderresult = cur.fetchall()
             cur.execute(sql, (receiver))
             receiverresult = cur.fetchall()
-        
+
         item = {
                 'id' : insertid,
                 'contents' : contents,
@@ -285,57 +233,36 @@ def insert_ene(conn, x):
                 'datetime' : sysdate,
                 'empathyUserIds' : []
                 }
-    
+
         return {
             'result' : 1,
             'error' : '',
             'data' : item
-        } 
+        }
 
 # 未使用
 def db_put(dynamo, x):
-    
+
     return {
     }
 
-'''  
 # eね削除
-#
-# パスパラメータ
-# cardid=eねカードID
-#
-# {
-#   body: {
-#     data: {
-#       id: eねカードID
-#     }
-#   }
-# }
-#
-# 戻り値（JSON）
-# {
-#   result : 1（成功） もしくは 0（失敗）
-#   error : エラーのときのメッセージ配列
-#   data : { 
-#     削除件数
-#   }
-'''
 def db_delete(conn, x):
-    
+
     cardid = x['pathParameters'].get('cardid') if x['pathParameters'] else None
     with conn.cursor() as cur:
         sql = "delete from Ene_Messages WHERE id = %s"
         r = cur.execute(sql, (cardid))
-        
+
         conn.commit()
-    
+
     return {
         'result' : 1,
         'error' : '',
         'data' : r
     }
-        
-                
+
+
 def respond(res):
     print(json.dumps(res))
     return {
@@ -353,5 +280,5 @@ def db_error(msg):
         'error' : msg,
         'data' : {}
     }
-    
+
 
