@@ -64,38 +64,7 @@ def lambda_handler(event, context):
         return respond(ValueError('Unsupported method "{}"'.format(operation)))
 
 
-'''
-eねカード取得
-#
-# パスパラメータ
-# cardid: カードID
-#
-# 戻り値（JSON）
-# {
-#   result : 1（成功） もしくは 0（失敗）
-#   error : エラーのときのメッセージ配列
-#   data : [
-#       {   
-#           "id": eねカードのID
-#           "sender":[ 送り主
-#                {
-#                    "name": 名前
-#                    "imageurl" プロフィール画像
-#                }
-#            ], 
-#            "receiver":[ 
-#                { 
-#                  "name": 名前
-#                  "imageurl" プロフィール画像
-#                }
-#            ],
-#            "contents": eね内容
-#            "datetime": 更新時間
-#            "empathyUserIds"　共感しているユーザー
-#        }
-#   ]
-# }
-'''
+# eねカード取得
 def db_get(conn, x):
     
     # カードID取得
@@ -141,7 +110,7 @@ def edit_enecarddata(dbresult):
     with conn.cursor() as cur:
         for d in dbresult:
             data = {}
-            likeUserIds = []
+            results = []
             for k,v in d.items():
                 if k == 'sender' or k == 'receiver':
                     sql = "select * from Ene_Users WHERE userid = %s"
@@ -157,8 +126,11 @@ def edit_enecarddata(dbresult):
                     likeUsers = cur.fetchall()
                     for d in likeUsers:
                         for k,v in d.items():
-                            likeUserIds.append(v)
-                    data['empathyUserIds'] = likeUserIds
+                            sql = "select * from Ene_Users WHERE userid = %s"
+                            cur.execute(sql, (v))
+                            result = cur.fetchall()
+                            results.append(result[0])
+                    data['empathyUsers'] = results
                 else:
                     data[k] = v
         
@@ -168,30 +140,6 @@ def edit_enecarddata(dbresult):
 
 
 # eね投稿
-#
-# パスパラメータ
-# cardid=eねカードID
-# 省略時は新規投稿、設定時は共感
-#
-# {
-#   body: {
-#     data: {
-#       sender: 送り主ユーザーID
-#       receiver: 送り先ユーザーID
-#       contents: 内容
-#       giftCoin: 送信コイン
-#       userid: 共感ユーザーID
-#     }
-#   }
-# }
-#
-# 戻り値（JSON）
-# {
-#   result : 1（成功） もしくは 0（失敗）
-#   error : エラーのときのメッセージ配列
-#   data : { 
-#     設定されたデータ（形式は入力データと同じ）
-#   }
 def db_post(conn, x):
     
     # 簡易的なエラーチェック
@@ -242,30 +190,46 @@ def insert_ene(conn, x):
         contents   = x['data'].get('contents')
         receiver   = x['data'].get('receiverid')
         sender     = x['data'].get('senderid')
-#        amount     = x['data'].get('amount')
+        amount     = x['data'].get('amount')
     
         # 簡易的なエラーチェック
         if str.strip(contents) == '':
             return db_error('いいね内容が空欄です')
+        if (len(contents)) > 140:
+            return db_error('いいね内容は140字以内で入力してください')
+        if str.strip(receiver) == '':
+            return db_error('宛先が空欄です')
         if not re.match(r"^\d+$", str(receiver)):
             return db_error('送り先IDが正しくありません')
         if not re.match(r"^\d+$", str(sender)):
             return db_error('送り主IDが正しくありません')
-#        if str.strip(amount) == '':
-#            return db_error('送信コインが空欄です')
+        if str.strip(amount) == '':
+            return db_error('送信コインが空欄です')
+        if int(amount) == 0:
+            return db_error('送信コインは1枚以上を指定してください')
     
         # システム日付取得
         sysdate = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     
         # DBに書き込む
         with conn.cursor() as cur:
-            sql = "insert into Ene_Messages (contents, sender, receiver, datetime) VALUES (%s, %s, %s, %s)"
-            r = cur.execute(sql, (contents, sender, receiver, sysdate))
+            # eねメッセージTBLを更新
+            sql = "insert into Ene_Messages (contents, sender, receiver, datetime, amount) VALUES (%s, %s, %s, %s, %s)"
+            r = cur.execute(sql, (contents, sender, receiver, sysdate, amount))
             print(r)
+            
+            # 更新後のカード情報を取得
             sql = "select * from Ene_Messages WHERE id = %s"
             insertid = conn.insert_id()
             cur.execute(sql, (insertid))
             result = cur.fetchall()
+            
+            # いいねコイン、グリココイン数を更新
+            sql = "update Ene_Users set enecoin = enecoin - %s where userid = %s"
+            cur.execute(sql, (amount, sender))
+            sql = "update Ene_Users set glicocoin = glicocoin + %s where userid = %s"
+            cur.execute(sql, (amount, receiver))
+            
             conn.commit()
         
         # ユーザー情報の取得
@@ -283,7 +247,8 @@ def insert_ene(conn, x):
                 'receiver' : receiverresult[0],
                 'sender'   : senderresult[0],
                 'datetime' : sysdate,
-                'empathyUserIds' : []
+                'empathyUsers' : [],
+                'amount'   : int(amount)
                 }
     
         return {
@@ -298,28 +263,7 @@ def db_put(dynamo, x):
     return {
     }
 
-'''  
 # eね削除
-#
-# パスパラメータ
-# cardid=eねカードID
-#
-# {
-#   body: {
-#     data: {
-#       id: eねカードID
-#     }
-#   }
-# }
-#
-# 戻り値（JSON）
-# {
-#   result : 1（成功） もしくは 0（失敗）
-#   error : エラーのときのメッセージ配列
-#   data : { 
-#     削除件数
-#   }
-'''
 def db_delete(conn, x):
     
     cardid = x['pathParameters'].get('cardid') if x['pathParameters'] else None
